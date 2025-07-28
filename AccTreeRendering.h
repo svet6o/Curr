@@ -19,7 +19,11 @@
 #include "CRTSettings.h"
 #include "CRTAccTree.h"
 
+
+
+
 // Accelerated ray tracing function
+// Corrected traceRayWithBVH function - следва точно алгоритъма от изискванията
 inline CRTColor traceRayWithBVH(
     const CRTRay& ray,
     const std::vector<CRTTriangle>& triangles,
@@ -31,7 +35,8 @@ inline CRTColor traceRayWithBVH(
     float shadowBias = 1e-4f,
     float refractionBias = 1e-4f
 ) {
-    if (depth > 10) {
+    // Check max ray depth from settings
+    if (depth > 5) {
         return settings.backgroundColor;
     }
 
@@ -57,30 +62,47 @@ inline CRTColor traceRayWithBVH(
                          ? mat.sampleTexture(hitUV, hitU, hitV)
                          : mat.albedo;
 
-    // Material-specific shading logic - ТОЧНО КАТО В BRUTE FORCE
+    // Material-specific shading logic
     switch (mat.type) {
         case CRTMaterial::Type::DIFFUSE: {
-            CRTColor accum(0, 0, 0);
+            // SHADE ALGORITHM - точно както е описан в изискванията
+            CRTColor finalColor(0, 0, 0);
+            
+            // For all lights in the scene
             for (const auto& light : lights) {
-                CRTVector L = light.getPosition() - hitPoint;
-                float dist = L.length();
-                L = L.normalize();
-
-                float NdotL = std::max(0.0f, normalToUse.dot(L));
-                if (NdotL <= 0.0f) continue;
-
-                // Shadow ray using acceleration tree
-                CRTRay shadowRay(hitPoint + normalToUse * shadowBias, L);
-                bool inShadow = accTree.intersectShadow(shadowRay, triangles, materials, dist, hitTriangleIdx);
-
-
-                if (inShadow) continue;
-
-                float Li = light.getIntensity();
-                float attenuation = Li / (4.0f * 3.14159265f * dist * dist + 1e-4f);
-                accum += baseColor * (attenuation * NdotL);
+                // Compute direction from hitPoint to light position
+                CRTVector lightDir = light.getPosition() - hitPoint;
+                
+                // Compute sphere radius (distance to light)
+                float sr = lightDir.length();
+                
+                // Normalize lightDir
+                lightDir = lightDir.normalize();
+                
+                // Calculate Cosine Law
+                float cosLaw = std::max(0.0f, normalToUse.dot(lightDir));
+                if (cosLaw <= 0.0f) continue; // Light behind surface
+                
+                // Light intensity
+                float li = light.getIntensity();
+                
+                // Compute sphere area: sa = 4 * pi * sr * sr
+                float sa = 4.0f * 3.14159265f * sr * sr;
+                
+                // Create shadow ray
+                CRTRay shadowRay(hitPoint + normalToUse * shadowBias, lightDir);
+                
+                // Trace shadow ray to check for triangle intersection
+                bool intersection = accTree.intersectShadow(shadowRay, triangles, materials, sr, hitTriangleIdx);
+                
+                // Light contribution: intersection ? 0 : Color(li / sa * albedo * cosLaw)
+                if (!intersection) {
+                    float attenuation = li / (sa + 1e-4f); // Add epsilon to prevent division by zero
+                    CRTColor lightContribution = baseColor * (attenuation * cosLaw);
+                    finalColor += lightContribution;
+                }
             }
-            return accum;
+            return finalColor;
         }
         
         case CRTMaterial::Type::REFLECTIVE: {
@@ -94,36 +116,68 @@ inline CRTColor traceRayWithBVH(
             CRTVector I = ray.getDirection().normalize();
             CRTVector N = normalToUse;
             float eta1 = 1.0f, eta2 = mat.ior;
+            
+            // Check if the incident ray leaves the transparent object
             if (I.dot(N) > 0.0f) {
                 N = -N;
                 std::swap(eta1, eta2);
             }
-
-            // Reflection
-            CRTVector Rdir = I - N * (2.0f * I.dot(N));
-            CRTRay reflectRay(hitPoint + N * shadowBias, Rdir.normalize());
-            CRTColor C_reflect = traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
-
-            // Refraction - ПОПРАВЕНА ГРЕШКА!
-            CRTVector Tdir;
-            CRTColor C_refract(0, 0, 0);
-            if (Refract(I, N, eta1, eta2, Tdir)) {
-                CRTRay refractRay(hitPoint - N * refractionBias, Tdir);
-                C_refract = traceRayWithBVH(refractRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
+            
+            // Compute the cosine between I and N
+            float cosIN = -I.dot(N);
+            
+            // Check if angle(I, N) < critical angle
+            float sinIN = std::sqrt(1.0f - cosIN * cosIN);
+            float criticalSin = eta2 / eta1;
+            
+            if (sinIN < criticalSin) {
+                // No total internal reflection - compute both reflection and refraction
+                
+                // Using Snell's Law find sin(R, -N)
+                float sinRN = (sinIN * eta1) / eta2;
+                float cosRN = std::sqrt(1.0f - sinRN * sinRN);
+                
+                // Compute vector R using vector addition: R = A + B
+                // A = cos(β) * -N = cosRN * (-N)
+                CRTVector A = (-N) * cosRN;
+                
+                // C = (I + cos(α) * N).normalize() where cos(α) = cosIN
+                CRTVector C = (I + N * cosIN).normalize();
+                
+                // B = C * sin(β) = C * sinRN
+                CRTVector B = C * sinRN;
+                
+                // R = A + B
+                CRTVector R = A + B;
+                R = R.normalize();
+                
+                // Construct refraction ray
+                CRTRay refractionRay(hitPoint + (-N) * refractionBias, R);
+                CRTColor refractionColor = traceRayWithBVH(refractionRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
+                
+                // Construct reflection ray
+                CRTVector reflectionDir = I - 2.0f * I.dot(N) * N;
+                CRTRay reflectionRay(hitPoint + N * shadowBias, reflectionDir.normalize());
+                CRTColor reflectionColor = traceRayWithBVH(reflectionRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
+                
+                // Fresnel calculation: fresnel = 0.5 * (1.0 + dot(I, N))^5
+                float fresnel = 0.5f * std::pow(1.0f + I.dot(N), 5.0f);
+                
+                return reflectionColor * fresnel + refractionColor * (1.0f - fresnel);
             }
-
-            // Fresnel calculation
-            float kr = (C_refract.r || C_refract.g || C_refract.b)
-                     ? FresnelSchlick(I, N, mat.ior)
-                     : 1.0f;
-            return C_reflect * kr + C_refract * (1.0f - kr);
+            else {
+                // Total internal reflection - construct reflection ray only
+                CRTVector reflectionDir = I - 2.0f * I.dot(N) * N;
+                CRTRay reflectionRay(hitPoint + N * shadowBias, reflectionDir.normalize());
+                return traceRayWithBVH(reflectionRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
+            }
         }
 
         case CRTMaterial::Type::CONSTANT:
             return baseColor;
 
         default:
-            return CRTColor(255, 0, 255); // Магента за грешка
+            return CRTColor(255, 0, 255); // Magenta for error
     }
 }
 

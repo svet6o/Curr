@@ -68,14 +68,6 @@ static bool Refract(const CRTVector &I, const CRTVector &N, float eta1, float et
     float n1 = eta1, n2 = eta2;
     CRTVector nN = N;
 
-    if (cosI < 0.0f)
-    {
-
-        cosI = -cosI;
-        std::swap(n1, n2);
-        nN = -N;
-    }
-
     float eta = n1 / n2;
     float sinT2 = eta * eta * (1.0f - cosI * cosI);
     if (sinT2 > 1.0f)
@@ -422,7 +414,7 @@ int main() {
     std::vector<CRTMaterial> materials;
     
     std::cout << "Loading scene..." << std::endl;
-    loadSceneFromFile("scene1.crtscene", settings, camera, triangles, lights, materials);
+    loadSceneFromFile("scene8.crtscene", settings, camera, triangles, lights, materials);
     
     std::cout << "Scene loaded: " << triangles.size() << " triangles, "
               << materials.size() << " materials, " << lights.size() << " lights" << std::endl;
@@ -452,7 +444,7 @@ int main() {
         settings,
         camera,
         autoAccTree,  
-        "scene1_auto.ppm"
+        "scene8_auto.ppm"
     );
     
     high_resolution_clock::time_point renderStop = high_resolution_clock::now();
