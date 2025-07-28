@@ -1,3 +1,4 @@
+// AccTreeRendering.h - ПОПРАВЕНА ВЕРСИЯ
 #pragma once
 
 #include <vector>
@@ -27,11 +28,10 @@ inline CRTColor traceRayWithBVH(
     const CRTSettings& settings,
     const CRTAccTree& accTree,
     int depth = 0,
-    bool isShadowRay = false,
     float shadowBias = 1e-4f,
     float refractionBias = 1e-4f
 ) {
-    if (depth > 5) {
+    if (depth > 10) {
         return settings.backgroundColor;
     }
 
@@ -57,7 +57,7 @@ inline CRTColor traceRayWithBVH(
                          ? mat.sampleTexture(hitUV, hitU, hitV)
                          : mat.albedo;
 
-    // Material-specific shading logic
+    // Material-specific shading logic - ТОЧНО КАТО В BRUTE FORCE
     switch (mat.type) {
         case CRTMaterial::Type::DIFFUSE: {
             CRTColor accum(0, 0, 0);
@@ -70,8 +70,9 @@ inline CRTColor traceRayWithBVH(
                 if (NdotL <= 0.0f) continue;
 
                 // Shadow ray using acceleration tree
-                CRTRay shadowRay(hitPoint + L * shadowBias, L);
+                CRTRay shadowRay(hitPoint + normalToUse * shadowBias, L);
                 bool inShadow = accTree.intersectShadow(shadowRay, triangles, materials, dist, hitTriangleIdx);
+
 
                 if (inShadow) continue;
 
@@ -81,11 +82,12 @@ inline CRTColor traceRayWithBVH(
             }
             return accum;
         }
+        
         case CRTMaterial::Type::REFLECTIVE: {
             CRTVector I = ray.getDirection().normalize();
             CRTVector R = I - normalToUse * (2.0f * I.dot(normalToUse));
             CRTRay reflectRay(hitPoint + normalToUse * shadowBias, R.normalize());
-            return traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1);
+            return traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
         }
 
         case CRTMaterial::Type::REFRACTIVE: {
@@ -97,21 +99,20 @@ inline CRTColor traceRayWithBVH(
                 std::swap(eta1, eta2);
             }
 
+            // Reflection
             CRTVector Rdir = I - N * (2.0f * I.dot(N));
             CRTRay reflectRay(hitPoint + N * shadowBias, Rdir.normalize());
-            CRTColor C_reflect = traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1);
+            CRTColor C_reflect = traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
 
+            // Refraction - ПОПРАВЕНА ГРЕШКА!
             CRTVector Tdir;
             CRTColor C_refract(0, 0, 0);
             if (Refract(I, N, eta1, eta2, Tdir)) {
                 CRTRay refractRay(hitPoint - N * refractionBias, Tdir);
-                C_refract =  traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1);
+                C_refract = traceRayWithBVH(refractRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
             }
 
-            if (isShadowRay) {
-                return (C_refract.r || C_refract.g || C_refract.b) ? C_refract : C_reflect;
-            }
-
+            // Fresnel calculation
             float kr = (C_refract.r || C_refract.g || C_refract.b)
                      ? FresnelSchlick(I, N, mat.ior)
                      : 1.0f;
@@ -125,7 +126,6 @@ inline CRTColor traceRayWithBVH(
             return CRTColor(255, 0, 255); // Магента за грешка
     }
 }
-
 
 // Bucket structure for multithreaded rendering
 struct BVHBucket {
@@ -146,7 +146,8 @@ inline void renderBVHBucket(
     for (int y = bucket.y0; y < bucket.y1; ++y) {
         for (int x = bucket.x0; x < bucket.x1; ++x) {
             CRTRay primary = CRTRay::generatePrimaryRay(x, y, width, height, camera);
-            CRTColor color = traceRayWithBVH(primary, triangles, materials, lights, settings, accTree, 0, false, 1e-4f, 1e-4f);
+            // ПОПРАВЕНО: Премахнах isShadowRay параметъра за консистенция с brute force
+            CRTColor color = traceRayWithBVH(primary, triangles, materials, lights, settings, accTree, 0, 1e-4f, 1e-4f);
 
             const int idx = (y * width + x) * 3;
             imageBuffer[idx + 0] = static_cast<float>(color.r);

@@ -61,11 +61,10 @@ public:
         return idx;
     }
     
-    // AABB split algorithm
+    // FIXED: AABB split algorithm
     std::pair<CRTAABB, CRTAABB> splitAABB(const CRTAABB& aabbToSplit, int splitAxisIdx) const {
         // Calculate the middle point for the splitting
-        float range = aabbToSplit.maxPoint.getX();
-        float minVal = aabbToSplit.minPoint.getX();
+        float range, minVal;
         
         switch (splitAxisIdx) {
             case 0: // X axis
@@ -79,6 +78,11 @@ public:
             case 2: // Z axis
                 range = aabbToSplit.maxPoint.getZ() - aabbToSplit.minPoint.getZ();
                 minVal = aabbToSplit.minPoint.getZ();
+                break;
+            default:
+                // Fallback to X axis
+                range = aabbToSplit.maxPoint.getX() - aabbToSplit.minPoint.getX();
+                minVal = aabbToSplit.minPoint.getX();
                 break;
         }
         
@@ -218,6 +222,7 @@ public:
     }
     
 private:
+    // FIXED: Tree traversal with epsilon check to avoid self-intersection
     void intersectNode(int nodeIdx, const CRTRay& ray, const std::vector<CRTTriangle>& triangles,
                        float& closestT, int& hitTriangleIdx, float& hitU, float& hitV,
                        CRTVector& hitNormal, CRTVector& hitUV, bool& hasHit) const {
@@ -236,7 +241,8 @@ private:
                 CRTVector normal, uv;
                 
                 if (triangles[triIdx].intersect(ray, t, u, v, normal, uv)) {
-                    if (t < closestT) {
+                    // FIXED: Added epsilon check to avoid self-intersection
+                    if (t > 1e-6f && t < closestT) {
                         closestT = t;
                         hitTriangleIdx = triIdx;
                         hitU = u;
@@ -262,68 +268,67 @@ private:
 
 public:
     // Shadow ray intersection (early termination)
-    bool intersectShadow(const CRTRay& ray, const std::vector<CRTTriangle>& triangles,
+   bool intersectShadow(const CRTRay& ray, const std::vector<CRTTriangle>& triangles,
+                     const std::vector<CRTMaterial>& materials, float maxDistance,
+                     int ignoreTriangleIdx = -1) const {
+    if (nodes.empty()) return false;
+    
+    return intersectShadowNode(0, ray, triangles, materials, maxDistance, ignoreTriangleIdx);
+}
+
+private:
+// FIXED: Use consistent AABB intersection method
+bool intersectShadowNode(int nodeIdx, const CRTRay& ray, const std::vector<CRTTriangle>& triangles,
                          const std::vector<CRTMaterial>& materials, float maxDistance,
-                         int ignoreTriangleIdx = -1) const {
-        if (nodes.empty()) return false;
-        
-        return intersectShadowNode(0, ray, triangles, materials, maxDistance, ignoreTriangleIdx);
+                         int ignoreTriangleIdx) const {
+    
+    const CRTAccNode& node = nodes[nodeIdx];
+    
+    // FIXED: Use same intersection method as main intersectNode
+    if (!node.boundingBox.intersect(ray)) {
+        return false; // Ray doesn't hit this node's bounding box
     }
     
-private:
-    bool intersectShadowNode(int nodeIdx, const CRTRay& ray, const std::vector<CRTTriangle>& triangles,
-                             const std::vector<CRTMaterial>& materials, float maxDistance,
-                             int ignoreTriangleIdx) const {
-        
-        const CRTAccNode& node = nodes[nodeIdx];
-        
-        // Test ray against node's AABB with distance constraint
-        float tNear, tFar;
-        if (!node.boundingBox.intersect(ray, tNear, tFar)) {
-            return false;
-        }
-        
-        // If intersection is beyond the light, no shadow
-        if (tNear > maxDistance) {
-            return false;
-        }
-        
-        if (node.isLeaf()) {
-            // Test against all triangles in this leaf
-            for (int triIdx : node.triangleIndices) {
-                if (triIdx == ignoreTriangleIdx) continue;
-                
-                float t, u, v;
-                CRTVector normal, uv;
-                
-                if (triangles[triIdx].intersect(ray, t, u, v, normal, uv)) {
-                    if (t > 1e-4f && t < maxDistance) {
-                        // Check if this is a refractive material (transparent)
-                        int matIdx = triangles[triIdx].getMaterialIndex();
-                        if (matIdx < static_cast<int>(materials.size()) && 
-                            materials[matIdx].type == CRTMaterial::Type::REFRACTIVE) {
-                            continue; // Skip transparent materials for shadows
-                        }
-                        return true; // Shadow ray blocked
+    // NOTE: Removed tNear > maxDistance check since we don't have tNear anymore
+    // The distance check will be done per-triangle instead
+    
+    if (node.isLeaf()) {
+        // Test against all triangles in this leaf
+        for (int triIdx : node.triangleIndices) {
+            if (triIdx == ignoreTriangleIdx) continue;
+            
+            float t, u, v;
+            CRTVector normal, uv;
+            
+            if (triangles[triIdx].intersect(ray, t, u, v, normal, uv)) {
+                // FIXED: Check distance properly here
+                if (t > 1e-6f && t < maxDistance) {
+                    // Check if this is a refractive material (transparent)
+                    int matIdx = triangles[triIdx].getMaterialIndex();
+                    if (matIdx < static_cast<int>(materials.size()) && 
+                        materials[matIdx].type == CRTMaterial::Type::REFRACTIVE) {
+                        continue; // Skip transparent materials for shadows
                     }
-                }
-            }
-        } else {
-            // Recursively test child nodes
-            if (node.child0Idx != -1) {
-                if (intersectShadowNode(node.child0Idx, ray, triangles, materials, maxDistance, ignoreTriangleIdx)) {
-                    return true;
-                }
-            }
-            if (node.child1Idx != -1) {
-                if (intersectShadowNode(node.child1Idx, ray, triangles, materials, maxDistance, ignoreTriangleIdx)) {
-                    return true;
+                    return true; // Shadow ray blocked
                 }
             }
         }
-        
-        return false;
+    } else {
+        // Recursively test child nodes
+        if (node.child0Idx != -1) {
+            if (intersectShadowNode(node.child0Idx, ray, triangles, materials, maxDistance, ignoreTriangleIdx)) {
+                return true;
+            }
+        }
+        if (node.child1Idx != -1) {
+            if (intersectShadowNode(node.child1Idx, ray, triangles, materials, maxDistance, ignoreTriangleIdx)) {
+                return true;
+            }
+        }
     }
+    
+    return false;
+}
 
 public:
     // Get statistics

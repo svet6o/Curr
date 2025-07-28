@@ -253,7 +253,7 @@ void renderTriangleScene(const std::vector<CRTTriangle> &triangles,
         {
             CRTRay primary = CRTRay::generatePrimaryRay(x, y, W, H, camera);
 
-            image[y][x] = traceRay(primary, triangles, materials, lights, settings, 0, 1e-4f);
+            image[y][x] = traceRay(primary, triangles, materials, lights, settings, 0);
         }
     }
 
@@ -422,7 +422,7 @@ int main() {
     std::vector<CRTMaterial> materials;
     
     std::cout << "Loading scene..." << std::endl;
-    loadSceneFromFile("scene7.crtscene", settings, camera, triangles, lights, materials);
+    loadSceneFromFile("scene1.crtscene", settings, camera, triangles, lights, materials);
     
     std::cout << "Scene loaded: " << triangles.size() << " triangles, "
               << materials.size() << " materials, " << lights.size() << " lights" << std::endl;
@@ -432,7 +432,7 @@ int main() {
     
     high_resolution_clock::time_point buildStart = high_resolution_clock::now();
     
-    autoAccTree.autoBuild(triangles, false);
+    autoAccTree.autoBuild(triangles,false);
     
     high_resolution_clock::time_point buildStop = high_resolution_clock::now();
     microseconds buildDuration = duration_cast<microseconds>(buildStop - buildStart);
@@ -452,7 +452,7 @@ int main() {
         settings,
         camera,
         autoAccTree,  
-        "scene7_auto.ppm"
+        "scene1_auto.ppm"
     );
     
     high_resolution_clock::time_point renderStop = high_resolution_clock::now();

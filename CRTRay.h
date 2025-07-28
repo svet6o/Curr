@@ -24,7 +24,7 @@ public:
         return origin + direction * t;
     }
 
- static CRTRay generatePrimaryRay(int x, int y, int imageWidth, int imageHeight, const CRTCamera& camera) {
+static CRTRay generatePrimaryRay(int x, int y, int imageWidth, int imageHeight, const CRTCamera& camera) {
         float pixelCenterX = static_cast<float>(x) + 0.5f;
         float pixelCenterY = static_cast<float>(y) + 0.5f;
 
