@@ -9,232 +9,205 @@
 
 class CRTAABB {
 public:
-    CRTVector min, max;
+    CRTVector minPoint;
+    CRTVector maxPoint;
 
     // Default constructor - creates invalid AABB
-    CRTAABB() : min(std::numeric_limits<float>::max(), 
-                    std::numeric_limits<float>::max(), 
-                    std::numeric_limits<float>::max()),
-                max(-std::numeric_limits<float>::max(), 
-                    -std::numeric_limits<float>::max(), 
-                    -std::numeric_limits<float>::max()) {}
+    CRTAABB() 
+        : minPoint(std::numeric_limits<float>::max(),
+                   std::numeric_limits<float>::max(),
+                   std::numeric_limits<float>::max()),
+          maxPoint(std::numeric_limits<float>::lowest(),
+                   std::numeric_limits<float>::lowest(),
+                   std::numeric_limits<float>::lowest()) {}
 
     // Constructor with min/max points
-    CRTAABB(const CRTVector& minPoint, const CRTVector& maxPoint) 
-        : min(minPoint), max(maxPoint) {}
+    CRTAABB(const CRTVector& min, const CRTVector& max)
+        : minPoint(min), maxPoint(max) {}
 
-    // Check if AABB is valid (min <= max for all components)
-    bool isValid() const {
-        return min.getX() <= max.getX() && 
-               min.getY() <= max.getY() && 
-               min.getZ() <= max.getZ();
-    }
-
-    // Create AABB from a single triangle
-    static CRTAABB fromTriangle(const CRTTriangle& triangle) {
-        const CRTVector* vertices = triangle.getVertices();
-        
-        CRTVector minPoint = vertices[0];
-        CRTVector maxPoint = vertices[0];
-        
-        for (int i = 1; i < 3; ++i) {
-            minPoint = minPoint.componentMin(vertices[i]);
-            maxPoint = maxPoint.componentMax(vertices[i]);
-        }
-        
-        return CRTAABB(minPoint, maxPoint);
-    }
-
-    // Create AABB from multiple triangles
+    // Build AABB from a collection of triangles
     static CRTAABB fromTriangles(const std::vector<CRTTriangle>& triangles) {
-        if (triangles.empty()) {
-            return CRTAABB(); // Invalid AABB
+        CRTAABB box;
+        
+        for (const auto& triangle : triangles) {
+            for (int i = 0; i < 3; ++i) {
+                const CRTVector& vertex = triangle.getVertex(i);
+                box.expand(vertex);
+            }
         }
         
-        CRTAABB result = fromTriangle(triangles[0]);
-        
-        for (size_t i = 1; i < triangles.size(); ++i) {
-            CRTAABB triangleBounds = fromTriangle(triangles[i]);
-            result.expand(triangleBounds);
-        }
-        
-        return result;
+        return box;
     }
 
-    // Expand this AABB to include another AABB
-    void expand(const CRTAABB& other) {
-        if (!other.isValid()) return;
+    // Build AABB from a single triangle
+    static CRTAABB fromTriangle(const CRTTriangle& triangle) {
+        CRTAABB box;
         
-        if (!isValid()) {
-            *this = other;
-            return;
+        for (int i = 0; i < 3; ++i) {
+            const CRTVector& vertex = triangle.getVertex(i);
+            box.expand(vertex);
         }
         
-        min = min.componentMin(other.min);
-        max = max.componentMax(other.max);
+        return box;
     }
 
-    // Expand this AABB to include a point
+    // Expand the AABB to include a point
     void expand(const CRTVector& point) {
-        if (!isValid()) {
-            min = max = point;
-            return;
+        minPoint = CRTVector(
+            std::min(minPoint.getX(), point.getX()),
+            std::min(minPoint.getY(), point.getY()),
+            std::min(minPoint.getZ(), point.getZ())
+        );
+        
+        maxPoint = CRTVector(
+            std::max(maxPoint.getX(), point.getX()),
+            std::max(maxPoint.getY(), point.getY()),
+            std::max(maxPoint.getZ(), point.getZ())
+        );
+    }
+
+    // Expand the AABB to include another AABB
+    void expand(const CRTAABB& other) {
+        expand(other.minPoint);
+        expand(other.maxPoint);
+    }
+
+    // Check if this AABB is valid (min <= max for all components)
+    bool isValid() const {
+        return minPoint.getX() <= maxPoint.getX() &&
+               minPoint.getY() <= maxPoint.getY() &&
+               minPoint.getZ() <= maxPoint.getZ();
+    }
+
+    // Get the center of the AABB
+    CRTVector getCenter() const {
+        return CRTVector(
+            (minPoint.getX() + maxPoint.getX()) * 0.5f,
+            (minPoint.getY() + maxPoint.getY()) * 0.5f,
+            (minPoint.getZ() + maxPoint.getZ()) * 0.5f
+        );
+    }
+
+    // Get the size (extents) of the AABB
+    CRTVector getSize() const {
+        return CRTVector(
+            maxPoint.getX() - minPoint.getX(),
+            maxPoint.getY() - minPoint.getY(),
+            maxPoint.getZ() - minPoint.getZ()
+        );
+    }
+
+    // Get surface area of the AABB (useful for BVH construction)
+    float getSurfaceArea() const {
+        CRTVector size = getSize();
+        return 2.0f * (size.getX() * size.getY() + 
+                       size.getY() * size.getZ() + 
+                       size.getZ() * size.getX());
+    }
+
+    // Ray-AABB intersection test using slab method
+    bool intersect(const CRTRay& ray, float& tNear, float& tFar) const {
+        const float epsilon = 1e-4f;
+        const CRTVector& origin = ray.getOrigin();
+        const CRTVector& direction = ray.getDirection();
+        
+        tNear = 0.0f;
+        tFar = std::numeric_limits<float>::max();
+
+        // Test intersection with each pair of parallel planes
+        for (int axis = 0; axis < 3; ++axis) {
+            float rayOrigin, rayDir, boxMin, boxMax;
+            
+            switch (axis) {
+                case 0: // X axis
+                    rayOrigin = origin.getX();
+                    rayDir = direction.getX();
+                    boxMin = minPoint.getX();
+                    boxMax = maxPoint.getX();
+                    break;
+                case 1: // Y axis
+                    rayOrigin = origin.getY();
+                    rayDir = direction.getY();
+                    boxMin = minPoint.getY();
+                    boxMax = maxPoint.getY();
+                    break;
+                case 2: // Z axis
+                    rayOrigin = origin.getZ();
+                    rayDir = direction.getZ();
+                    boxMin = minPoint.getZ();
+                    boxMax = maxPoint.getZ();
+                    break;
+            }
+
+            if (std::abs(rayDir) < epsilon) {
+                // Ray is parallel to the slab
+                if (rayOrigin < boxMin || rayOrigin > boxMax) {
+                    return false; // Ray is outside the slab
+                }
+            } else {
+                // Calculate intersection distances
+                float t1 = (boxMin - rayOrigin) / rayDir;
+                float t2 = (boxMax - rayOrigin) / rayDir;
+                
+                // Ensure t1 is the near intersection, t2 is the far
+                if (t1 > t2) {
+                    std::swap(t1, t2);
+                }
+                
+                // Update the intersection interval
+                tNear = std::max(tNear, t1);
+                tFar = std::min(tFar, t2);
+                
+                // Check if the interval is valid
+                if (tNear > tFar) {
+                    return false; // No intersection
+                }
+            }
         }
         
-        min = min.componentMin(point);
-        max = max.componentMax(point);
+        // For shadow rays, we need tNear to be positive and meaningful
+        return tFar >= 0.0f && tNear < tFar;
     }
 
-    // Split AABB into two halves along the specified axis (0=X, 1=Y, 2=Z)
-    std::pair<CRTAABB, CRTAABB> split(int axis) const {
-        CRTAABB a = *this;
-        CRTAABB b = *this;
-        
-        float minComponent, maxComponent;
-        switch (axis) {
-            case 0: // X axis
-                minComponent = min.getX();
-                maxComponent = max.getX();
-                break;
-            case 1: // Y axis
-                minComponent = min.getY();
-                maxComponent = max.getY();
-                break;
-            case 2: // Z axis
-                minComponent = min.getZ();
-                maxComponent = max.getZ();
-                break;
-            default:
-                return std::make_pair(*this, *this); // No split
-        }
-        
-        float mid = (maxComponent - minComponent) / 2.0f;
-        float splitPlaneCoordinate = minComponent + mid;
-        
-        // Update A's max component for the splitting axis
-        switch (axis) {
-            case 0:
-                a.max = CRTVector(splitPlaneCoordinate, a.max.getY(), a.max.getZ());
-                b.min = CRTVector(splitPlaneCoordinate, b.min.getY(), b.min.getZ());
-                break;
-            case 1:
-                a.max = CRTVector(a.max.getX(), splitPlaneCoordinate, a.max.getZ());
-                b.min = CRTVector(b.min.getX(), splitPlaneCoordinate, b.min.getZ());
-                break;
-            case 2:
-                a.max = CRTVector(a.max.getX(), a.max.getY(), splitPlaneCoordinate);
-                b.min = CRTVector(b.min.getX(), b.min.getY(), splitPlaneCoordinate);
-                break;
-        }
-        
-        return std::make_pair(a, b);
-    }
-
-    // Check if this AABB intersects with another AABB
-    bool intersects(const CRTAABB& other) const {
-        // Check each axis
-        if (min.getX() > other.max.getX() || max.getX() < other.min.getX()) return false;
-        if (min.getY() > other.max.getY() || max.getY() < other.min.getY()) return false;
-        if (min.getZ() > other.max.getZ() || max.getZ() < other.min.getZ()) return false;
-        return true;
-    }
-
-    // Check if triangle AABB intersects with this node AABB
-    bool intersectsTriangle(const CRTTriangle& triangle) const {
-        CRTAABB triAABB = fromTriangle(triangle);
-        return intersects(triAABB);
-    }
-
-    // Ray-AABB intersection test
+    // Simple ray-AABB intersection test (returns only boolean)
     bool intersect(const CRTRay& ray) const {
         float tNear, tFar;
         return intersect(ray, tNear, tFar);
     }
 
-    // Ray-AABB intersection test with t values
-    bool intersect(const CRTRay& ray, float& tNear, float& tFar) const {
-        const CRTVector& origin = ray.getOrigin();
-        const CRTVector& direction = ray.getDirection();
-        
-        tNear = -std::numeric_limits<float>::infinity();
-        tFar = std::numeric_limits<float>::infinity();
-        
-        // Check intersection for each axis
-        for (int axis = 0; axis < 3; ++axis) {
-            float rayOrigin, rayDir, boxMin, boxMax;
-            
-            switch (axis) {
-                case 0:
-                    rayOrigin = origin.getX();
-                    rayDir = direction.getX();
-                    boxMin = min.getX();
-                    boxMax = max.getX();
-                    break;
-                case 1:
-                    rayOrigin = origin.getY();
-                    rayDir = direction.getY();
-                    boxMin = min.getY();
-                    boxMax = max.getY();
-                    break;
-                case 2:
-                    rayOrigin = origin.getZ();
-                    rayDir = direction.getZ();
-                    boxMin = min.getZ();
-                    boxMax = max.getZ();
-                    break;
-            }
-            
-            if (std::abs(rayDir) < 1e-8f) {
-                // Ray is parallel to the slab
-                if (rayOrigin < boxMin || rayOrigin > boxMax) {
-                    return false;
-                }
-            } else {
-                // Calculate intersection t values for this axis
-                float t1 = (boxMin - rayOrigin) / rayDir;
-                float t2 = (boxMax - rayOrigin) / rayDir;
-                
-                if (t1 > t2) std::swap(t1, t2);
-                
-                tNear = std::max(tNear, t1);
-                tFar = std::min(tFar, t2);
-                
-                if (tNear > tFar) return false;
-            }
-        }
-        
-        return tFar > 0; // We want intersections in front of the ray
+    // Check if a point is inside the AABB
+    bool contains(const CRTVector& point) const {
+        return point.getX() >= minPoint.getX() && point.getX() <= maxPoint.getX() &&
+               point.getY() >= minPoint.getY() && point.getY() <= maxPoint.getY() &&
+               point.getZ() >= minPoint.getZ() && point.getZ() <= maxPoint.getZ();
     }
 
-    // Get center point of AABB
-    CRTVector getCenter() const {
-        return CRTVector(
-            (min.getX() + max.getX()) * 0.5f,
-            (min.getY() + max.getY()) * 0.5f,
-            (min.getZ() + max.getZ()) * 0.5f
-        );
+    // Check if this AABB overlaps with another AABB
+    bool overlaps(const CRTAABB& other) const {
+        return minPoint.getX() <= other.maxPoint.getX() && maxPoint.getX() >= other.minPoint.getX() &&
+               minPoint.getY() <= other.maxPoint.getY() && maxPoint.getY() >= other.minPoint.getY() &&
+               minPoint.getZ() <= other.maxPoint.getZ() && maxPoint.getZ() >= other.minPoint.getZ();
     }
 
-    // Get size (extent) of AABB
-    CRTVector getSize() const {
-        return CRTVector(
-            max.getX() - min.getX(),
-            max.getY() - min.getY(),
-            max.getZ() - min.getZ()
-        );
-    }
-
-    // Get surface area of AABB (useful for SAH)
-    float getSurfaceArea() const {
+    // Get the longest axis (0=X, 1=Y, 2=Z)
+    int getLongestAxis() const {
         CRTVector size = getSize();
-        return 2.0f * (size.getX() * size.getY() + 
-                      size.getY() * size.getZ() + 
-                      size.getZ() * size.getX());
+        if (size.getX() >= size.getY() && size.getX() >= size.getZ()) return 0;
+        if (size.getY() >= size.getZ()) return 1;
+        return 2;
     }
 
-    // Get volume of AABB
-    float getVolume() const {
-        CRTVector size = getSize();
-        return size.getX() * size.getY() * size.getZ();
+    // Generate the 8 corner points of the AABB
+    std::vector<CRTVector> getCorners() const {
+        return {
+            CRTVector(minPoint.getX(), minPoint.getY(), minPoint.getZ()),
+            CRTVector(maxPoint.getX(), minPoint.getY(), minPoint.getZ()),
+            CRTVector(minPoint.getX(), maxPoint.getY(), minPoint.getZ()),
+            CRTVector(maxPoint.getX(), maxPoint.getY(), minPoint.getZ()),
+            CRTVector(minPoint.getX(), minPoint.getY(), maxPoint.getZ()),
+            CRTVector(maxPoint.getX(), minPoint.getY(), maxPoint.getZ()),
+            CRTVector(minPoint.getX(), maxPoint.getY(), maxPoint.getZ()),
+            CRTVector(maxPoint.getX(), maxPoint.getY(), maxPoint.getZ())
+        };
     }
 };
