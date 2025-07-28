@@ -106,10 +106,20 @@ inline CRTColor traceRayWithBVH(
         }
         
         case CRTMaterial::Type::REFLECTIVE: {
+            
             CRTVector I = ray.getDirection().normalize();
-            CRTVector R = I - normalToUse * (2.0f * I.dot(normalToUse));
-            CRTRay reflectRay(hitPoint + normalToUse * shadowBias, R.normalize());
-            return traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
+    
+            float cosTheta = I.dot(normalToUse);
+            CRTVector R = I - 2.0f * cosTheta * normalToUse;
+            R = R.normalize();
+
+            CRTRay reflectRay(hitPoint + normalToUse * shadowBias, R);
+            CRTColor reflectedColor = traceRayWithBVH(reflectRay, triangles, materials, lights, settings, accTree, depth + 1, shadowBias, refractionBias);
+
+            CRTColor finalColor = reflectedColor * baseColor * 0.9f;
+            finalColor += baseColor * 0.1f;
+
+            return finalColor;
         }
 
         case CRTMaterial::Type::REFRACTIVE: {

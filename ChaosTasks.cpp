@@ -88,7 +88,7 @@ static float FresnelSchlick(const CRTVector &I, const CRTVector &N, float ior)
 
     float sinT = eta1 / eta2 * sqrtf(1.0f - cosI * cosI);
     if (sinT >= 1.0f)
-        return 1.0f; // Total internal reflection
+        return 1.0f;
 
     float cosT = sqrtf(1.0f - sinT * sinT);
     float rParallel = ((eta2 * cosI) - (eta1 * cosT)) / ((eta2 * cosI) + (eta1 * cosT));
@@ -414,7 +414,7 @@ int main() {
     std::vector<CRTMaterial> materials;
     
     std::cout << "Loading scene..." << std::endl;
-    loadSceneFromFile("scene8.crtscene", settings, camera, triangles, lights, materials);
+    loadSceneFromFile("scene2.crtscene", settings, camera, triangles, lights, materials);
     
     std::cout << "Scene loaded: " << triangles.size() << " triangles, "
               << materials.size() << " materials, " << lights.size() << " lights" << std::endl;
@@ -444,7 +444,7 @@ int main() {
         settings,
         camera,
         autoAccTree,  
-        "scene8_auto.ppm"
+        "scene2_auto.ppm"
     );
     
     high_resolution_clock::time_point renderStop = high_resolution_clock::now();
