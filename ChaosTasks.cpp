@@ -35,58 +35,69 @@
 
 using namespace std::chrono;
 
-template<typename T>
-constexpr const T& clamp(const T& value, const T& min, const T& max) {
-    return (value < min) ? min : (max < value) ? max : value;
+template <typename T>
+constexpr const T &clamp(const T &value, const T &min, const T &max)
+{
+    return (value < min) ? min : (max < value) ? max
+                                               : value;
 }
 
-void saveToPPM(const std::string& filename, const std::vector<std::vector<CRTColor>>& image) {
+void saveToPPM(const std::string &filename, const std::vector<std::vector<CRTColor>> &image)
+{
     int width = image[0].size();
     int height = image.size();
-    
+
     std::ofstream ppmFile(filename);
-    ppmFile << "P3\n" << width << " " << height << "\n255\n";
-    
-    for (const auto& row : image) {
-        for (const auto& pixel : row) {
+    ppmFile << "P3\n"
+            << width << " " << height << "\n255\n";
+
+    for (const auto &row : image)
+    {
+        for (const auto &pixel : row)
+        {
             ppmFile << pixel.r << " " << pixel.g << " " << pixel.b << " ";
         }
         ppmFile << "\n";
     }
 }
 
-static bool Refract(const CRTVector& I, const CRTVector& N, float eta1, float eta2, 
-                    CRTVector& refracted) {
+static bool Refract(const CRTVector &I, const CRTVector &N, float eta1, float eta2,
+                    CRTVector &refracted)
+{
     float cosI = -I.dot(N);
     float n1 = eta1, n2 = eta2;
     CRTVector nN = N;
-    
-    if (cosI < 0.0f) {
-       
+
+    if (cosI < 0.0f)
+    {
+
         cosI = -cosI;
         std::swap(n1, n2);
         nN = -N;
     }
-    
+
     float eta = n1 / n2;
     float sinT2 = eta * eta * (1.0f - cosI * cosI);
-    if (sinT2 > 1.0f) return false;  
+    if (sinT2 > 1.0f)
+        return false;
 
     float cosT = std::sqrt(1.0f - sinT2);
     refracted = I * eta + nN * (eta * cosI - cosT);
-    refracted = refracted.normalize();  
+    refracted = refracted.normalize();
     return true;
 }
 
-
-static float FresnelSchlick(const CRTVector& I, const CRTVector& N, float ior) {
+static float FresnelSchlick(const CRTVector &I, const CRTVector &N, float ior)
+{
     float cosI = clamp(-I.dot(N), -1.0f, 1.0f);
     float eta1 = 1.0f, eta2 = ior;
-    if (cosI > 0) std::swap(eta1, eta2);
-    
+    if (cosI > 0)
+        std::swap(eta1, eta2);
+
     float sinT = eta1 / eta2 * sqrtf(1.0f - cosI * cosI);
-    if (sinT >= 1.0f) return 1.0f; // Total internal reflection
-    
+    if (sinT >= 1.0f)
+        return 1.0f; // Total internal reflection
+
     float cosT = sqrtf(1.0f - sinT * sinT);
     float rParallel = ((eta2 * cosI) - (eta1 * cosT)) / ((eta2 * cosI) + (eta1 * cosT));
     float rPerpendicular = ((eta1 * cosI) - (eta2 * cosT)) / ((eta1 * cosI) + (eta2 * cosT));
@@ -421,7 +432,7 @@ int main() {
     
     high_resolution_clock::time_point buildStart = high_resolution_clock::now();
     
-    autoAccTree.autoBuild(triangles);
+    autoAccTree.autoBuild(triangles, false);
     
     high_resolution_clock::time_point buildStop = high_resolution_clock::now();
     microseconds buildDuration = duration_cast<microseconds>(buildStop - buildStart);
@@ -434,13 +445,14 @@ int main() {
     
     // Render with AutoAccTree acceleration using BVH rendering
     std::cout << "Starting BVH-accelerated rendering..." << std::endl;
-    renderTriangleScene(
+    renderTriangleSceneWithBVH(
         triangles,
         materials,
         lights,
-        camera,
         settings,
-        "scene7.ppm"
+        camera,
+        autoAccTree,  
+        "scene7_auto.ppm"
     );
     
     high_resolution_clock::time_point renderStop = high_resolution_clock::now();
